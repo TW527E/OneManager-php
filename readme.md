@@ -41,15 +41,16 @@
 
   https://onemanager.qkqpttgf.repl.co/  
 
-### Notice
-
-> `Import from Github` useing the `.replit` file in code files will cause an empty web page, may someone help me?  
-
 ### How to Install
+A:
+> 1. Click the "+" or "Create Repl", click the `Import from Github`;  
+> 2. Input `https://github.com/qkqpttgf/OneManager-php` in "GitHub URL", then it will auto show "Language" - "PHP Web Server", Click the "Import from Github";  
+> 3. After done, click the green button "Run", it will show the web page on the right, you MUST open it in a new tab or window.
 
+B:
 > 1. Click the "+" or "Create Repl", find template "PHP Web Server" (via input "php"), input a name for your project in "Title" or left it default, Click the "+ Create Repl".  
 > 2. After done, input `git clone https://github.com/qkqpttgf/OneManager-php && mv -b OneManager-php/* ./ && mv -b OneManager-php/.[^.]* ./ && rm -rf *~ && rm -rf OneManager-php` to Console or Shell on the right, press "Enter" to run it.  
-> 3. Click the green button "Run", it will show the web page on the right, you can open it in a new tab or window.  
+> 3. Click the green button "Run", it will show the web page on the right, you MUST open it in a new tab or window.  
 
 ---
 
@@ -166,13 +167,15 @@
 
 1. Start web service on your server (httpd or other), make sure you can visit it.  
 
-2. Make the rewrite works, the rule is in .htaccess file, make sure any query redirect to index.php.  
+2. Install (or Enable) rewrite_module (or RewriteEngine, or URL_rewrite).  
 
 3. Upload code.  
 
-4. Change the file .data/config.php can be read&write (666 is suggested).  
+4. Make the rewrite works, the rule is in .htaccess file (IIS rule in web.config file), make sure any query redirect to index.php.  
 
-5. View the website in chrome or other.  
+5. Change the file .data/config.php can be read&write (666 is suggested).  
+
+6. View the website in chrome or other.  
 
 ----
 
