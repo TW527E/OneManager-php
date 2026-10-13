@@ -36,26 +36,20 @@ class AliyundriveOpen extends Aliyundrive {
                 $files['type'] = 'folder';
                 //error_log1(json_encode($files, JSON_PRETTY_PRINT));
             } else {
-                $tmp = splitlast($path, '/');
-                $parent_path = $tmp[0];
-                $filename = urldecode($tmp[1]);
-                $parent_folder = $this->list_path($parent_path);
-                foreach ($parent_folder['items'] as $item) {
-                    if ($item['name'] == $filename) {
-                        if ($item['type'] == 'folder') {
-                            $files = $this->fileList($item['file_id']);
-                            $files['type'] = 'folder';
-                            $files['file_id'] = $item['file_id'];
-                            $files['name'] = $item['name'];
-                            $files['time'] = $item['updated_at'];
-                            $files['size'] = $item['size'];
-                        } else {
-                            $item[$this->DownurlStrName] = $this->getDownloadUrl($item['file_id']);
-                            $files = $item;
-                        }
+                $file = $this->fileGetByPath($path);
+                //echo json_encode($file);
+                if ($file['type'] == 'folder') {
+                    $files = $this->fileList($file['file_id']);
+                    $files['file_id'] = $file['file_id'];
+                    $files['type'] = 'folder';
+                } else {
+                    $files = $file;
+                    if ($file['type'] == 'file') {
+                        $tmp = $this->getDownloadUrl($file['file_id']);
+                        if (isset($tmp['stat'])) $files = $tmp;
+                        else $files[$this->DownurlStrName] = $tmp;
                     }
                 }
-                //echo $files['name'];
             }
             if ($files['type'] == 'file') {
                 if (in_array(strtolower(splitlast($files['name'], '.')[1]), $exts['txt'])) {
@@ -93,9 +87,9 @@ class AliyundriveOpen extends Aliyundrive {
                 }
             }
             if (!$files) {
+                $files['error']['stat'] = 404;
                 $files['error']['code'] = 'Not Found';
                 $files['error']['message'] = $path . ' Not Found';
-                $files['error']['stat'] = 404;
             } elseif (isset($files['stat'])) {
                 $files['error']['stat'] = $files['stat'];
                 $files['error']['code'] = 'Error';
@@ -124,6 +118,21 @@ class AliyundriveOpen extends Aliyundrive {
 
         $data['drive_id'] = $this->driveId;
         $data['file_id'] = $file_id;
+
+        $res = curl('POST', $url, json_encode($data), $header);
+        if ($res['stat'] == 200) return json_decode($res['body'], true);
+        else return $res;
+    }
+    protected function fileGetByPath($file_path) {
+        $file_path = urldecode($file_path);
+        //echo $file_path . "<br>";
+        $url = $this->api_url . 'openFile/get_by_path';
+
+        $header["content-type"] = "application/json; charset=utf-8";
+        $header['authorization'] = 'Bearer ' . $this->access_token;
+
+        $data['drive_id'] = $this->driveId;
+        $data['file_path'] = $file_path;
 
         $res = curl('POST', $url, json_encode($data), $header);
         if ($res['stat'] == 200) return json_decode($res['body'], true);
@@ -274,14 +283,13 @@ class AliyundriveOpen extends Aliyundrive {
         return output(json_encode($this->files_format(json_decode($result['body'], true))), $result['stat']);
     }
     public function Copy($file) {
+        //echo json_encode($file);
         if (!$file['id']) {
-            $oldfile = $this->list_path($file['path'] . '/' . $file['name']);
-            //error_log1('res:' . json_encode($res));
-            //$file['id'] = $res['file_id'];
+            $oldfile = $this->fileGetByPath($file['path'] . '/' . $file['name']);
         } else {
             $oldfile = $this->fileGet($file['id']);
         }
-        if ($oldfile['type'] == 'folder') return output('Can not copy folder', 415);
+        if ($oldfile['type'] == 'folder') return output('Can not copy a folder', 415);
 
         $url = $this->api_url . 'openFile/copy';
 

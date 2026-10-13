@@ -141,8 +141,8 @@ function main($path) {
     global $slash;
     global $drive;
 
-    $slash = '/';
-    if (strpos(__DIR__, ':')) $slash = '\\';
+    if (!function_exists('curl_init')) return output('<font color="red">Need curl</font>, please install php-curl.', 500);
+
     $drive = null;
     $_SERVER['php_starttime'] = microtime(true);
     $path = path_format($path);
@@ -181,14 +181,14 @@ function main($path) {
     if (empty($_SERVER['sitename'])) $_SERVER['sitename'] = getconstStr('defaultSitename');
 
     if (isset($_GET['jsFile'])) {
-        if (substr($_GET['jsFile'], -3) != '.js') return output('', 403);
+        if (substr($_GET['jsFile'], -3) != '.js') return output('Only js files', 403);
         if (!($path == '' || $path == '/')) return output('', 308, ['Location' => path_format($_SERVER['base_path'] . '/?jsFile=' . $_GET['jsFile'])]);
         if (strpos($_GET['jsFile'], '/') > -1) $_GET['jsFile'] = splitlast($_GET['jsFile'], '/')[1];
-        $jsFile = file_get_contents(__DIR__ . '/js/' . $_GET['jsFile']);
-        if (!!$jsFile) {
-            return output(base64_encode($jsFile), 200, ['Content-Type' => 'text/javascript; charset=utf-8', 'Cache-Control' => 'max-age=' . 3 * 24 * 60 * 60], true);
+        $jsFile = file_get_contents(__DIR__ . $slash . 'js' . $slash . $_GET['jsFile']);
+        if (!$jsFile) {
+            return output('File ' . $_GET['jsFile'] . ' Not Found', 404);
         } else {
-            return output('', 404);
+            return output(base64_encode($jsFile), 200, ['Content-Type' => 'text/javascript; charset=utf-8', 'Cache-Control' => 'max-age=' . 3 * 24 * 60 * 60], true);
         }
     }
     if (isset($_GET['WaitFunction'])) {
@@ -245,13 +245,18 @@ function main($path) {
     if (isset($_GET['AddDisk'])) {
         if ($_GET['AddDisk'] === true) {
             $tmp = path_format($_SERVER['base_path'] . '/' . $path);
-            return output('Please visit <a href="' . $tmp . '">' . $tmp . '</a>.', 301, ['Location' => $tmp]);
+            return output('Please visit <a href="' . $tmp . '">' . $tmp . '</a>.', 302, ['Location' => $tmp]);
         }
         if ($_SERVER['admin']) {
             if (!$_SERVER['disktag']) $_SERVER['disktag'] = '';
-            if (!class_exists($_GET['AddDisk'])) require 'disk' . $slash . $_GET['AddDisk'] . '.php';
-            $drive = new $_GET['AddDisk']($_GET['disktag']);
-            return $drive->AddDisk();
+            if (file_exists(__DIR__ . $slash . 'disk' . $slash . $_GET['AddDisk'] . '.php')) {
+                if (!class_exists($_GET['AddDisk'])) require 'disk' . $slash . $_GET['AddDisk'] . '.php';
+                $drive = new $_GET['AddDisk']($_GET['disktag']);
+                return $drive->AddDisk();
+            } else {
+                $tmp = path_format($_SERVER['base_path'] . '/' . $path);
+                return output('<meta http-equiv="refresh" content="3;URL=' . $tmp . '">No drive named "' . $_GET['AddDisk'] . '".', 400);
+            }
         } else {
             $url = $_SERVER['PHP_SELF'];
             /*if ($_GET) {
@@ -464,8 +469,11 @@ function main($path) {
     if ($files['type'] == 'file' && !isset($_GET['preview'])) {
         if ($_SERVER['ishidden'] < 4 || (!!getConfig('downloadencrypt', $_SERVER['disktag']) && $files['name'] != getConfig('passfile'))) {
             $url = $files['url'];
-            if (strtolower(splitlast($files['name'], '.')[1]) == 'html') return output($files['content']['body'], $files['content']['stat']);
-            else {
+            $exp = strtolower(splitlast($files['name'], '.')[1]);
+            if ($exp == 'htm' || $exp == 'html') {
+                // HTML file display
+                return output($files['content']['body'], $files['content']['stat']);
+            } else {
                 if (isset($_SERVER['HTTP_IF_MODIFIED_SINCE']) && strtotime($files['time']) == strtotime($_SERVER['HTTP_IF_MODIFIED_SINCE'])) return output('', 304);
                 $fileConduitSize = getConfig('fileConduitSize', $_SERVER['disktag']);
                 $fileConduitCacheTime = getConfig('fileConduitCacheTime', $_SERVER['disktag']);
@@ -499,6 +507,9 @@ function main($path) {
                             //'access-control-allow-origin' => '*',
                             //'access-control-expose-headers' => 'Content-Length, WWW-Authenticate, Location, Accept-Ranges',
                             'Content-Type' => $files['mime'],
+                            //'Content-Disposition' => 'attachment; filename*="utf-8\'\'' . str_replace(".", "%2E", str_replace("+", "%20", urlencode($files['name']))) . '"; filename="' . $files['name'] . '"',
+                            'Content-Disposition' => 'attachment; filename*="utf-8\'\'' . str_replace("+", "%20", urlencode($files['name'])) . '"; filename="' . $files['name'] . '"',
+                            //'Content-Disposition' => 'attachment; filename*="utf-8\'\'' . iconv("GBK", "utf-8", $files['name']) . '"; filename="' . $files['name'] . '"',
                             'Cache-Control' => 'max-age=' . $fileConduitCacheTime,
                             //'Cache-Control' => 'max-age=0',
                             'Last-Modified' => gmdate('D, d M Y H:i:s T', strtotime($files['time']))
@@ -670,15 +681,16 @@ function savecache($key, $value, $disktag = '', $exp = 1800) {
 }
 
 function filecache($disktag) {
+    global $slash;
     $dir = sys_get_temp_dir();
     if (!is_writable($dir)) {
-        $tmp = __DIR__ . '/tmp/';
+        $tmp = __DIR__ . $slash . 'tmp' . $slash;
         if (file_exists($tmp)) {
             if (is_writable($tmp)) $dir = $tmp;
         } elseif (mkdir($tmp)) $dir = $tmp;
     }
-    $tag = $_SERVER['HTTP_HOST'] . '/OneManager/' . $disktag;
-    while (strpos($tag, '/') > -1) $tag = str_replace('/', '_', $tag);
+    $tag = $_SERVER['HTTP_HOST'] . $slash . 'OneManager' . $slash . $disktag;
+    while (strpos($tag, $slash) > -1) $tag = str_replace($slash, '_', $tag);
     if (strpos($tag, ':') > -1) {
         $tag = str_replace(':', '_', $tag);
         $tag = str_replace('\\', '_', $tag);
@@ -760,7 +772,7 @@ function chkTxtCode($str) {
 
 function getconstStr($str) {
     global $constStr;
-    if ($constStr[$str][$constStr['language']] != '') return $constStr[$str][$constStr['language']];
+    if (isset($constStr[$str][$constStr['language']]) && $constStr[$str][$constStr['language']] != '') return $constStr[$str][$constStr['language']];
     return $constStr[$str]['en-us'];
 }
 
@@ -1077,12 +1089,12 @@ function needUpdate() {
     return 0;
 }
 
-function output($body, $statusCode = 200, $headers = ['Content-Type' => 'text/html'], $isBase64Encoded = false) {
+function output($body, $statusCode = 200, $headers = [], $isBase64Encoded = false) {
     if (isset($_SERVER['Set-Cookie'])) $headers['Set-Cookie'] = $_SERVER['Set-Cookie'];
     if (baseclassofdrive() == 'Aliyundrive' || baseclassofdrive() == 'BaiduDisk') $headers['Referrer-Policy'] = 'no-referrer';
     //$headers['Referrer-Policy'] = 'same-origin';
     //$headers['X-Frame-Options'] = 'sameorigin';
-    if (!isset($_SERVER['Content-Type'])) $headers['Content-Type'] = 'text/html';
+    if (!isset($headers['Content-Type'])) $headers['Content-Type'] = 'text/html';
     return [
         'isBase64Encoded' => $isBase64Encoded,
         'statusCode' => $statusCode,
@@ -1379,7 +1391,7 @@ function EnvOpt($needUpdate = 0) {
             return message($html, $title, 400);
         } else {
             //WaitSCFStat();
-            $html .= getconstStr('UpdateSuccess') . '<br><a href="">' . getconstStr('Back') . '</a><script>var status = "' . $response['DplStatus'] . '";</script>';
+            $html .= getconstStr('UpdateSuccess') . '<br><a href="">' . getconstStr('Back') . '</a><script>var status = "' . (isset($response['DplStatus']) ? $response['DplStatus'] : "") . '";</script>';
             $title = getconstStr('Setup');
             return message($html, $title, 202, 1);
         }
@@ -2457,6 +2469,7 @@ function render_list($path = '', $files = []) {
         }
         $DriverFile = scandir(__DIR__ . $slash . 'disk');
         $Driver_arr = null;
+        $Driver_arr = [];
         foreach ($DriverFile as $v1) {
             if ($v1 != '.' && $v1 != '..') {
                 $v1 = splitlast($v1, '.php')[0];
