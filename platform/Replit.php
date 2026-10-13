@@ -75,29 +75,66 @@ function ReplitAPI($op, $key, $value = '') {
         return ['stat' => 500, 'body' => 'error option input to function ReplitAPI().'];
     }
 }
+function ReplitPGSQL($op, $key, $value = '') {
+    //echo $op . ":" . $key . ": " . $value . "<br>";
+    $tablename = 'OneManger';
+    $dbstr = "host=" . getenv("PGHOST") . " port=" . getenv("PGPORT") . " dbname=" . getenv("PGDATABASE") . " user=" . getenv("PGUSER") . " password=" . getenv("PGPASSWORD") . " requiressl=disable";
+    $db = null;
+    try {
+        $db =  pg_connect($dbstr);
+    } catch (Exception $e) {
+        echo $e->getMessage() . '<br>';
+    }
+    if (!$db) return ['stat' => 500, 'body' =>  'Open datebase error.'];
+    $sql = "CREATE TABLE IF NOT EXISTS " . $tablename . " (keyname TEXT PRIMARY KEY, keyvalue TEXT);";
+    pg_query($db, $sql);
+    $result = '';
+    if ($op === 'r') {
+        $sql = "SELECT keyvalue FROM " . $tablename . " WHERE keyname='" . $key . "';";
+        $res = pg_query($db, $sql);
+        if ($res && $row = pg_fetch_row($res)) $result = $row[0];
+        return ['stat' => 200, 'body' => $result];
+    } elseif ($op === 'w') {
+        $sql = "INSERT INTO " . $tablename . " (keyname, keyvalue) VALUES ('" . $key . "', '" . $value . "') ON CONFLICT (keyname) DO UPDATE SET keyvalue = EXCLUDED.keyvalue;";
+        $res = pg_query($db, $sql);
+        if ($res) $result = $res;
+        return ['stat' => 200, 'body' => $result];
+    } elseif ($op === 'd') {
+        // not use
+        $sql = "DELETE FROM " . $tablename . " WHERE keyname='" . $key . "';";
+        $res = pg_query($db, $sql);
+        if ($res) $result = $res;
+        return ['stat' => 200, 'body' => $result];
+    } else {
+        return ['stat' => 500, 'body' => 'error option: ' . $op . '.'];
+    }
+    //pg_close($db);
+}
 
 function getConfig($str, $disktag = '') {
     if (isInnerEnv($str)) {
         if ($disktag == '') $disktag = $_SERVER['disktag'];
-        $env = json_decode(ReplitAPI('r', $disktag)['body'], true);
+        $e = ReplitPGSQL('r', $disktag);
+        if ($e['stat'] == 500) return '';
+        $env = json_decode($e['body'], true);
         if (isset($env[$str])) {
             if (isBase64Env($str)) return base64y_decode($env[$str]);
             else return $env[$str];
         }
     } else {
-        if (isBase64Env($str)) return base64y_decode(ReplitAPI('r', $str)['body']);
-        else return ReplitAPI('r', $str)['body'];
+        //echo $str . "<br>";
+        $e = ReplitPGSQL('r', $str);
+        if ($e['stat'] == 500) return '';
+        if (isBase64Env($str)) return base64y_decode($e['body']);
+        else return $e['body'];
     }
     return '';
 }
 
 function setConfig($arr, $disktag = '') {
-    if (!($envs = getcache('REPLIT_CONFIG'))) {
-        $envs = json_decode(curl('GET', getenv('REPLIT_DB_URL') . '/REPLIT_CONFIG')['body'], true);
-        savecache('REPLIT_CONFIG', $envs);
-    }
     if ($disktag == '') $disktag = $_SERVER['disktag'];
     $disktags = explode("|", getConfig('disktag'));
+    $envs = [];
     $indisk = 0;
     $operatedisk = 0;
     foreach ($arr as $k => $v) {
@@ -117,7 +154,7 @@ function setConfig($arr, $disktag = '') {
             $operatedisk = 1;
         } elseif ($k == 'disktag_copy') {
             $newtag = $v . '_' . date("Ymd_His");
-            $envs[$newtag] = $envs[$v];
+            $envs[$newtag] = ReplitPGSQL('r', $v)['body'];
             array_push($disktags, $newtag);
             $operatedisk = 1;
         } elseif ($k == 'disktag_rename' || $k == 'disktag_newname') {
@@ -127,35 +164,34 @@ function setConfig($arr, $disktag = '') {
         }
     }
     if ($indisk) {
-        $diskconfig = $envs[$disktag];
+        $diskconfig = ReplitPGSQL('r', $disktag)['body'];
+        foreach ($envs[$disktag] as $k => $v) $diskconfig[$k] = $v;
         $diskconfig = array_filter($diskconfig, 'array_value_isnot_null');
         ksort($diskconfig);
         $envs[$disktag] = $diskconfig;
     }
     if ($operatedisk) {
         if (isset($arr['disktag_newname']) && $arr['disktag_newname'] != '') {
+            $envs[$arr['disktag_newname']] = ReplitPGSQL('r', $arr['disktag_rename'])['body'];
+            $envs[$arr['disktag_rename']] = '';
             $tags = [];
             foreach ($disktags as $tag) {
                 if ($tag == $arr['disktag_rename']) array_push($tags, $arr['disktag_newname']);
                 else array_push($tags, $tag);
             }
             $envs['disktag'] = implode('|', $tags);
-            $envs[$arr['disktag_newname']] = $envs[$arr['disktag_rename']];
-            unset($envs[$arr['disktag_rename']]);
         } else {
             $disktags = array_unique($disktags);
-            $disktag_s = "";
-            foreach ($disktags as $disktag) if ($disktag != '') $disktag_s .= $disktag . '|';
-            if ($disktag_s != '') $envs['disktag'] = substr($disktag_s, 0, -1);
-            else $envs['disktag'] = '';
+            $envs['disktag'] = implode('|', $disktags);
         }
     }
     $envs = array_filter($envs, 'array_value_isnot_null');
     sortConfig($envs);
-    $response = ReplitAPI('w', 'REPLIT_CONFIG', json_encode($envs));
-    //error_log1(json_encode($arr, JSON_PRETTY_PRINT) . ' => tmp：' . json_encode($envs, JSON_PRETTY_PRINT));
-    savecache('REPLIT_CONFIG', null, '', 0);
-    if (api_error($response)) return ['stat' => $response['stat'], 'body' => $response['body'] . "<br>\nError in writting " . json_encode($envs)];
+    foreach ($envs as $k => $v) {
+        if ($v != '') $response = ReplitPGSQL('w', $k, $v);
+        else $response = ReplitPGSQL('d', $k);
+        if (api_error($response)) return ['stat' => $response['stat'], 'body' => $response['body'] . "<br>\nError in writting " . $k . "<br>\n" . json_encode($envs)];
+    }
     return $response;
 }
 
